@@ -15,7 +15,6 @@ class Program
     private  ulong ChannelId;
 		private string BotToken;
     private const string PatchNotesUrl = "https://forums.playdeadlock.com/forums/changelog.10/";
-		private string _lastPostedLink = null;
 
     static async Task Main(string[] args) => await new Program().RunBotAsync();
 
@@ -25,7 +24,6 @@ class Program
 
 				DotNetEnv.Env.Load();
 
-        // Now retrieve environment variables
         BotToken = Environment.GetEnvironmentVariable("DISCORD_BOT_TOKEN") ?? throw new ArgumentNullException("DISCORD_BOT_TOKEN is not set.");
         GuildId = ulong.Parse(Environment.GetEnvironmentVariable("DISCORD_GUILD_ID") ?? throw new ArgumentNullException("DISCORD_GUILD_ID is not set."));
         ChannelId = ulong.Parse(Environment.GetEnvironmentVariable("DISCORD_CHANNEL_ID") ?? throw new ArgumentNullException("DISCORD_CHANNEL_ID is not set."));
@@ -101,14 +99,15 @@ class Program
         Console.WriteLine("Checking for patch notes...");
 
         var latestLink = await GetLatestPatchNotesLinkAsync();
-        if (latestLink != null && latestLink != _lastPostedLink)
+				var lastPost = await IsNewPatchNotesLinkAsync(latestLink);
+				Console.WriteLine("Here is the last set of patch notes: " + lastPost);
+        if (latestLink != null && lastPost)
         {
             Console.WriteLine("Patch notes link found, attempting to send message to Discord channel...");
 
             if (await TrySendMessageAsync(latestLink))
             {
                 Console.WriteLine("Message sent successfully!");
-								_lastPostedLink = latestLink;
             }
             else
             {
@@ -161,4 +160,48 @@ class Program
 
         return false;
     }
+
+		private async Task<bool> IsNewPatchNotesLinkAsync(string latestLink)
+		{
+				const int maxAttempts = 5;
+				int attempts = 0;
+
+				while (attempts < maxAttempts)
+				{
+						attempts++;
+
+						var guild = _client.GetGuild(GuildId);
+						if (guild != null)
+						{
+								var channel = guild.GetTextChannel(ChannelId);
+								if (channel != null)
+								{
+										var messages = await channel.GetMessagesAsync(1).FlattenAsync(); // Fetch the last message in the channel
+										var lastMessage = messages.FirstOrDefault();
+
+										if (lastMessage != null && lastMessage.Content.Contains(latestLink))
+										{
+												Console.WriteLine("Latest patch notes link has already been posted.");
+												return false; // The link is already in the last message
+										}
+
+										return true; // Either no messages or the latest link is not in the last message
+								}
+								else
+								{
+										Console.WriteLine("Channel not found. Retrying...");
+								}
+						}
+						else
+						{
+								Console.WriteLine("Guild not found. Retrying...");
+						}
+
+						await Task.Delay(1000); // Wait 1 second before retrying
+				}
+
+				Console.WriteLine("Failed to find guild or channel after multiple attempts.");
+				return true; // Default to true to prevent duplicate attempts if guild/channel couldn't be found
+		}
+
 }
